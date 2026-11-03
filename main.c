@@ -21,6 +21,49 @@ void free_tree(struct Node *node) {
     free(node);
 }
 
+struct Node *find_child(struct Node *dir, const char *name) {
+    for (int i = 0; i < dir->child_count; i++) {
+        if (strcmp(dir->children[i]->name, name) == 0) {
+            return dir->children[i];
+        }
+    }
+    return NULL;
+}
+
+struct Node *resolve_path(struct Node *cwd, struct Node *root, const char *path) {
+    char copy[1100];
+    strcpy(copy, path);
+
+    struct Node *cur;
+    if (path[0] == '/') {
+        cur = root;
+    } else {
+        cur = cwd;
+    }
+
+    char *part = strtok(copy, "/");
+    while (part != NULL) {
+        if (strcmp(part, ".") == 0) {
+            // stay
+        } else if (strcmp(part, "..") == 0) {
+            if (cur->parent != NULL) {
+                cur = cur->parent;
+            }
+        } else {
+            if (!cur->is_dir) {
+                return NULL;
+            }
+            struct Node *next = find_child(cur, part);
+            if (next == NULL) {
+                return NULL;
+            }
+            cur = next;
+        }
+        part = strtok(NULL, "/");
+    }
+    return cur;
+}
+
 void print_path(struct Node *node) {
     if (node->parent == NULL) {
         return;
@@ -136,28 +179,17 @@ int main(void) {
                     cwd->child_count++;
                 }
             }
-	} else if (strcmp(words[0], "cd") == 0) {
-    if (count != 2) {
-        printf("bushell:error\n");
-    } else if (strcmp(words[1], ".") == 0) {
-        // stay where we are
-    } else if (strcmp(words[1], "..") == 0) {
-        if (cwd->parent != NULL) {
-            cwd = cwd->parent;
-        }
-    } else {
-        struct Node *found = NULL;
-        for (int i = 0; i < cwd->child_count; i++) {
-            if (strcmp(cwd->children[i]->name, words[1]) == 0) {
-                found = cwd->children[i];
-            }
-        }
-        if (found == NULL || !found->is_dir) {
-            printf("bushell:error\n");
-        } else {
-            cwd = found;
-        }
-    }
+	 } else if (strcmp(words[0], "cd") == 0) {
+   		 if (count != 2) {
+        		printf("bushell:error\n");
+    		} else {
+        		struct Node *target = resolve_path(cwd, root, words[1]);
+        		if (target == NULL || !target->is_dir) {
+            			printf("bushell:error\n");
+        		} else {
+            			cwd = target;
+        		}
+    		}
 
         } else if (strcmp(words[0], "ls") == 0) {
             for (int i = 0; i < cwd->child_count; i++) {
