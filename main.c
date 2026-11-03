@@ -21,6 +21,22 @@ void free_tree(struct Node *node) {
     free(node);
 }
 
+void print_path(struct Node *node) {
+    if (node->parent == NULL) {
+        return;
+    }
+    print_path(node->parent);
+    printf("/%s", node->name);
+}
+
+void print_pwd(struct Node *node) {
+    if (node->parent == NULL) {
+        printf("/");
+    } else {
+        print_path(node);
+    }
+}
+
 int main(void) {
     char line[1100];
 
@@ -40,7 +56,9 @@ int main(void) {
     struct Node *cwd = root;
 
     while (1) {
-        printf("user@boun:/$ ");
+        printf("user@boun:");
+	print_pwd(cwd);
+	printf("$ ");
         if (fgets(line, sizeof(line), stdin) == NULL) {
             break;
         }
@@ -65,7 +83,8 @@ int main(void) {
         }
 
         if (strcmp(words[0], "pwd") == 0) {
-            printf("%s\n", cwd->name);
+	    print_pwd(cwd);
+            printf("\n");
         } else if (strcmp(words[0], "echo") == 0) {
             for (int i = 1; i < count; i++) {
                 if (i > 1) {
@@ -117,6 +136,29 @@ int main(void) {
                     cwd->child_count++;
                 }
             }
+	} else if (strcmp(words[0], "cd") == 0) {
+    if (count != 2) {
+        printf("bushell:error\n");
+    } else if (strcmp(words[1], ".") == 0) {
+        // stay where we are
+    } else if (strcmp(words[1], "..") == 0) {
+        if (cwd->parent != NULL) {
+            cwd = cwd->parent;
+        }
+    } else {
+        struct Node *found = NULL;
+        for (int i = 0; i < cwd->child_count; i++) {
+            if (strcmp(cwd->children[i]->name, words[1]) == 0) {
+                found = cwd->children[i];
+            }
+        }
+        if (found == NULL || !found->is_dir) {
+            printf("bushell:error\n");
+        } else {
+            cwd = found;
+        }
+    }
+
         } else if (strcmp(words[0], "ls") == 0) {
             for (int i = 0; i < cwd->child_count; i++) {
                 printf("%s", cwd->children[i]->name);
@@ -125,6 +167,7 @@ int main(void) {
                 }
                 printf("\n");
             }
+	
         } else {
             printf("bushell: error\n");
         }
