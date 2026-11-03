@@ -2,17 +2,29 @@
 #include <stdlib.h>
 #include <string.h>
 
-// One entry of the file system (for now: only the root directory exists)
+// entry of the file system
 struct Node {
     char name[256];
     int is_dir;
     struct Node *parent;
+    struct Node **children;
+    int child_count;
+    int child_capacity;
 };
+
+// frees a node and everything below it
+void free_tree(struct Node *node) {
+    for (int i = 0; i < node->child_count; i++) {
+        free_tree(node->children[i]);
+    }
+    free(node->children);
+    free(node);
+}
 
 int main(void) {
     char line[1100];
 
-    // Create the root directory "/" in memory
+    // create the root directory 
     struct Node *root = malloc(sizeof(struct Node));
     if (root == NULL) {
         return 1;
@@ -20,8 +32,11 @@ int main(void) {
     strcpy(root->name, "/");
     root->is_dir = 1;
     root->parent = NULL;
+    root->children = NULL;
+    root->child_count = 0;
+    root->child_capacity = 0;
 
-    // The current working directory starts at the root
+    // current working directory starts at the root
     struct Node *cwd = root;
 
     while (1) {
@@ -59,11 +74,62 @@ int main(void) {
                 printf("%s", words[i]);
             }
             printf("\n");
+        } else if (strcmp(words[0], "mkdir") == 0) {
+            if (count != 2) {
+                printf("bushell: error\n");
+            } else {
+                // does this name already exist in the current directory?
+                int exists = 0;
+                for (int i = 0; i < cwd->child_count; i++) {
+                    if (strcmp(cwd->children[i]->name, words[1]) == 0) {
+                        exists = 1;
+                    }
+                }
+
+                if (exists) {
+                    printf("bushell: error\n");
+                } else {
+                    // grow the children list if it is full
+                    if (cwd->child_count == cwd->child_capacity) {
+                        if (cwd->child_capacity == 0) {
+                            cwd->child_capacity = 2;
+                        } else {
+                            cwd->child_capacity = cwd->child_capacity * 2;
+                        }
+                        cwd->children = realloc(cwd->children, cwd->child_capacity * sizeof(struct Node *));
+                        if (cwd->children == NULL) {
+                            return 1;
+                        }
+                    }
+
+                    // create the new directory and add it to the list
+                    struct Node *n = malloc(sizeof(struct Node));
+                    if (n == NULL) {
+                        return 1;
+                    }
+                    strcpy(n->name, words[1]);
+                    n->is_dir = 1;
+                    n->parent = cwd;
+                    n->children = NULL;
+                    n->child_count = 0;
+                    n->child_capacity = 0;
+                    cwd->children[cwd->child_count] = n;
+                    cwd->child_count++;
+                }
+            }
+        } else if (strcmp(words[0], "ls") == 0) {
+            for (int i = 0; i < cwd->child_count; i++) {
+                printf("%s", cwd->children[i]->name);
+                if (cwd->children[i]->is_dir) {
+                    printf("/");
+                }
+                printf("\n");
+            }
         } else {
             printf("bushell: error\n");
         }
     }
 
-    free(root);
+    free_tree(root);
     return 0;
 }
