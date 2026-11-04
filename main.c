@@ -164,19 +164,48 @@ int compare_nodes(const void *a, const void *b) {
     return strcmp(x->name, y->name);
 }
 
-void print_path(struct Node *node) {
+struct Buf {
+    char *data;
+    size_t len;
+    size_t cap;
+};
+
+int buf_add(struct Buf *b, const char *s) {
+    size_t n = strlen(s);
+    if (b->len + n + 1 > b->cap) {
+        size_t newcap = b->cap;
+        if (newcap == 0) {
+            newcap = 64;
+        }
+        while (b->len + n + 1 > newcap) {
+            newcap = newcap * 2;
+        }
+        char *bigger = realloc(b->data, newcap);
+        if (bigger == NULL) {
+            return 0;
+        }
+        b->data = bigger;
+        b->cap = newcap;
+    }
+    memcpy(b->data + b->len, s, n + 1);
+    b->len += n;
+    return 1;
+}
+
+void path_to_buf(struct Node *node, struct Buf *b) {
     if (node->parent == NULL) {
         return;
     }
-    print_path(node->parent);
-    printf("/%s", node->name);
+    path_to_buf(node->parent, b);
+    buf_add(b, "/");
+    buf_add(b, node->name);
 }
 
-void print_pwd(struct Node *node) {
+void pwd_to_buf(struct Node *node, struct Buf *b) {
     if (node->parent == NULL) {
-        printf("/");
+        buf_add(b, "/");
     } else {
-        print_path(node);
+        path_to_buf(node, b);
     }
 }
 
@@ -205,9 +234,10 @@ int main(void) {
     struct Node *cwd = root;
 
     while (1) {
-        printf("user@boun:");
-	print_pwd(cwd);
-	printf("$ ");
+        struct Buf p = {NULL, 0, 0};
+	pwd_to_buf(cwd, &p);
+	printf("user@boun:%s$ ", p.data);
+	free(p.data);
         if (fgets(line, sizeof(line), stdin) == NULL) {
             break;
         }
@@ -230,42 +260,45 @@ int main(void) {
         if (strcmp(words[0], "exit") == 0) {
             break;
         }
+	
+	int err = 0;
+	struct Buf out = {NULL, 0, 0};
 
         if (strcmp(words[0], "pwd") == 0) {
 		if ( count != 1) {
-			printf("bushell: error\n");	    
+			err = 1;	    
 		} else {
-			print_pwd(cwd);
-            		printf("\n");
+			pwd_to_buf(cwd, &out);
+            		buf_add(&out, "\n");
 		}
         } else if (strcmp(words[0], "echo") == 0) {
             for (int i = 1; i < count; i++) {
                 if (i > 1) {
-                    printf(" ");
+                    buf_add(&out, " ");
                 }
-                printf("%s", words[i]);
+                buf_add(&out, words[i]);
             }
-            printf("\n");
+            buf_add(&out, "\n");
         } else if (strcmp(words[0], "mkdir") == 0) {
     		char parent_path[1100];
     		char new_name[1100];
     		if (count != 2 || !split_path(words[1], parent_path, new_name)) {
-        		printf("bushell:error\n");
+        		err = 1;
     		} else {
         		struct Node *dir = resolve_path(cwd, root, parent_path);
         		if (dir == NULL || !dir->is_dir || find_child(dir, new_name) != NULL) {
-            			printf("bushell:error\n");
+            			err = 1;
         		} else if (add_child(dir, new_name, 1) == NULL) {
-            			printf("bushell:error\n");
+            			err = 1;
         		}
     		}
 	} else if (strcmp(words[0], "cd") == 0) {
    		 if (count != 2) {
-        		printf("bushell:error\n");
+        		err = 1;
     		} else {
         		struct Node *target = resolve_path(cwd, root, words[1]);
         		if (target == NULL || !target->is_dir) {
-            			printf("bushell:error\n");
+            			err = 1;
         		} else {
             			cwd = target;
         		}
@@ -274,14 +307,14 @@ int main(void) {
     		char parent_path[1100];
     		char new_name[1100];
     		if (count != 2 || !split_path(words[1], parent_path, new_name)) {
-        		printf("bushell:error\n");
+        		err = 1;
     		} else {
         		struct Node *dir = resolve_path(cwd, root, parent_path);
         		if (dir == NULL || !dir->is_dir) {
-            			printf("bushell:error\n");
+            			err = 1;
         		} else if (find_child(dir, new_name) == NULL) {
             			if (add_child(dir, new_name, 0) == NULL) {
-               				 printf("bushell:error\n");
+               				 err = 1;
             			}
         		}
     		}		
@@ -299,14 +332,14 @@ int main(void) {
     		}
 
     		if (!ok) {
-        		printf("bushell:error\n");
+        		err = 1;
     		} else {
         		if (cwd->child_count > 1) {
             			qsort(cwd->children, cwd->child_count, sizeof(struct Node *), compare_nodes);
         		}
         		int first = 1;
         		if (show_all) {
-            			printf("./ ../");
+            			buf_add(&out, "./ ../");
             			first = 0;
         		}
         		for (int i = 0; i < cwd->child_count; i++) {
@@ -314,19 +347,25 @@ int main(void) {
                 			continue;
             			}
             			if (!first) {
-                			printf(" ");
+                			buf_add(&out, " ");
             			}
             			first = 0;
-            			printf("%s", cwd->children[i]->name);
+            			buf_add(&out, cwd->children[i]->name);
             			if (cwd->children[i]->is_dir) {
-                			printf("/");
+                			buf_add(&out, "/");
             			}
         		}
-        		printf("\n");
+        		buf_add(&out, "\n");
     		}
 	} else {
+            err = 1;
+        } 
+	if (err) {
             printf("bushell: error\n");
+        } else if (out.len > 0) {
+            fwrite(out.data, 1, out.len, stdout);
         }
+        free(out.data);
     }
 
     free_tree(root);
