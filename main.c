@@ -3,11 +3,19 @@
 #include <string.h>
 
 // entry of the file system
+
+struct Inode {
+    char *content;
+    size_t size;
+    size_t ref_count;
+};
+
 struct Node {
     char *name;
     int is_dir;
     struct Node *parent;
     struct Node **children;
+    struct Inode *inode;
     int child_count;
     int child_capacity;
 };
@@ -18,6 +26,14 @@ void free_tree(struct Node *node) {
         free_tree(node->children[i]);
     }
     free(node->children);
+    if (node->inode != NULL) {
+        node->inode->ref_count--;
+        if (node->inode->ref_count == 0) {
+            free(node->inode->content);
+            free(node->inode);
+        }
+    }
+    free(node->name);
     free(node);
 }
 
@@ -94,6 +110,19 @@ struct Node *add_child(struct Node *dir, const char *name, int is_dir) {
     n->children = NULL;
     n->child_count = 0;
     n->child_capacity = 0;
+    if (is_dir) {
+	n->inode = NULL;
+    } else {
+	n->inode = malloc(sizeof(struct Inode));
+	if (n->inode == NULL) {
+		free(n->name);
+		free(n);
+		return NULL;
+	}
+	n->inode->content = NULL;
+	n->inode->size = 0;
+	n->inode->ref_count = 1;
+    }
     dir->children[dir->child_count] = n;
     dir->child_count++;
     return n;
@@ -170,6 +199,7 @@ int main(void) {
     root->children = NULL;
     root->child_count = 0;
     root->child_capacity = 0;
+    root->inode = NULL;
 
     // current working directory starts at the root
     struct Node *cwd = root;
