@@ -129,6 +129,12 @@ int split_path(const char *path, char *parent, char *name) {
     return 1;
 }
 
+int compare_nodes(const void *a, const void *b) {
+    struct Node *x = *(struct Node * const *)a;
+    struct Node *y = *(struct Node * const *)b;
+    return strcmp(x->name, y->name);
+}
+
 void print_path(struct Node *node) {
     if (node->parent == NULL) {
         return;
@@ -196,8 +202,12 @@ int main(void) {
         }
 
         if (strcmp(words[0], "pwd") == 0) {
-	    print_pwd(cwd);
-            printf("\n");
+		if ( count != 1) {
+			printf("bushell: error\n");	    
+		} else {
+			print_pwd(cwd);
+            		printf("\n");
+		}
         } else if (strcmp(words[0], "echo") == 0) {
             for (int i = 1; i < count; i++) {
                 if (i > 1) {
@@ -246,15 +256,45 @@ int main(void) {
         		}
     		}		
 	} else if (strcmp(words[0], "ls") == 0) {
-            for (int i = 0; i < cwd->child_count; i++) {
-                printf("%s", cwd->children[i]->name);
-                if (cwd->children[i]->is_dir) {
-                    printf("/");
-                }
-                printf("\n");
-            }
-	
-        } else {
+    		int show_all = 0;
+    		int ok = 1;
+    		if (count == 2) {
+        		if (strcmp(words[1], "-a") == 0) {
+            			show_all = 1;
+        		} else {
+            			ok = 0;
+        		}
+    		} else if (count > 2) {
+        		ok = 0;
+    		}
+
+    		if (!ok) {
+        		printf("bushell:error\n");
+    		} else {
+        		if (cwd->child_count > 1) {
+            			qsort(cwd->children, cwd->child_count, sizeof(struct Node *), compare_nodes);
+        		}
+        		int first = 1;
+        		if (show_all) {
+            			printf("./ ../");
+            			first = 0;
+        		}
+        		for (int i = 0; i < cwd->child_count; i++) {
+            			if (!show_all && cwd->children[i]->name[0] == '.') {
+                			continue;
+            			}
+            			if (!first) {
+                			printf(" ");
+            			}
+            			first = 0;
+            			printf("%s", cwd->children[i]->name);
+            			if (cwd->children[i]->is_dir) {
+                			printf("/");
+            			}
+        		}
+        		printf("\n");
+    		}
+	} else {
             printf("bushell: error\n");
         }
     }
