@@ -4,7 +4,7 @@
 
 // entry of the file system
 struct Node {
-    char name[256];
+    char *name;
     int is_dir;
     struct Node *parent;
     struct Node **children;
@@ -65,9 +65,6 @@ struct Node *resolve_path(struct Node *cwd, struct Node *root, const char *path)
 }
 
 struct Node *add_child(struct Node *dir, const char *name, int is_dir) {
-    if (strlen(name) > 255) {
-        return NULL;
-    }
     if (dir->child_count == dir->child_capacity) {
         int newcap;
         if (dir->child_capacity == 0) {
@@ -85,6 +82,11 @@ struct Node *add_child(struct Node *dir, const char *name, int is_dir) {
     struct Node *n = malloc(sizeof(struct Node));
     if (n == NULL) {
         return NULL;
+    }
+    n->name = malloc(strlen(name) + 1);
+    if (n->name == NULL) {
+       free(n);
+       return NULL;
     }
     strcpy(n->name, name);
     n->is_dir = is_dir;
@@ -150,6 +152,11 @@ int main(void) {
     struct Node *root = malloc(sizeof(struct Node));
     if (root == NULL) {
         return 1;
+    }
+    root->name = malloc(2);
+    if (root->name == NULL) {
+       free(root);
+       return 1;
     }
     strcpy(root->name, "/");
     root->is_dir = 1;
@@ -230,13 +237,15 @@ int main(void) {
         		printf("bushell:error\n");
     		} else {
         		struct Node *dir = resolve_path(cwd, root, parent_path);
-        		if (dir == NULL || !dir->is_dir || find_child(dir, new_name) != NULL) {
+        		if (dir == NULL || !dir->is_dir) {
             			printf("bushell:error\n");
-        	} else if (add_child(dir, new_name, 0) == NULL) {
-            		printf("bushell:error\n");
-        	}
-    	}
-        } else if (strcmp(words[0], "ls") == 0) {
+        		} else if (find_child(dir, new_name) == NULL) {
+            			if (add_child(dir, new_name, 0) == NULL) {
+               				 printf("bushell:error\n");
+            			}
+        		}
+    		}		
+	} else if (strcmp(words[0], "ls") == 0) {
             for (int i = 0; i < cwd->child_count; i++) {
                 printf("%s", cwd->children[i]->name);
                 if (cwd->children[i]->is_dir) {
