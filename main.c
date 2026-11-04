@@ -64,6 +64,69 @@ struct Node *resolve_path(struct Node *cwd, struct Node *root, const char *path)
     return cur;
 }
 
+struct Node *add_child(struct Node *dir, const char *name, int is_dir) {
+    if (strlen(name) > 255) {
+        return NULL;
+    }
+    if (dir->child_count == dir->child_capacity) {
+        int newcap;
+        if (dir->child_capacity == 0) {
+            newcap = 2;
+        } else {
+            newcap = dir->child_capacity * 2;
+        }
+        struct Node **bigger = realloc(dir->children, newcap * sizeof(struct Node *));
+        if (bigger == NULL) {
+            return NULL;
+        }
+        dir->children = bigger;
+        dir->child_capacity = newcap;
+    }
+    struct Node *n = malloc(sizeof(struct Node));
+    if (n == NULL) {
+        return NULL;
+    }
+    strcpy(n->name, name);
+    n->is_dir = is_dir;
+    n->parent = dir;
+    n->children = NULL;
+    n->child_count = 0;
+    n->child_capacity = 0;
+    dir->children[dir->child_count] = n;
+    dir->child_count++;
+    return n;
+}
+
+int split_path(const char *path, char *parent, char *name) {
+    char copy[1100];
+    strcpy(copy, path);
+
+    int len = strlen(copy);
+    while (len > 1 && copy[len - 1] == '/') {
+        copy[len - 1] = '\0';
+        len--;
+    }
+
+    char *slash = strrchr(copy, '/');
+    if (slash == NULL) {
+        strcpy(parent, ".");
+        strcpy(name, copy);
+    } else {
+        strcpy(name, slash + 1);
+        if (slash == copy) {
+            strcpy(parent, "/");
+        } else {
+            *slash = '\0';
+            strcpy(parent, copy);
+        }
+    }
+
+    if (strlen(name) == 0 || strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
+        return 0;
+    }
+    return 1;
+}
+
 void print_path(struct Node *node) {
     if (node->parent == NULL) {
         return;
@@ -137,49 +200,19 @@ int main(void) {
             }
             printf("\n");
         } else if (strcmp(words[0], "mkdir") == 0) {
-            if (count != 2) {
-                printf("bushell: error\n");
-            } else {
-                // does this name already exist in the current directory?
-                int exists = 0;
-                for (int i = 0; i < cwd->child_count; i++) {
-                    if (strcmp(cwd->children[i]->name, words[1]) == 0) {
-                        exists = 1;
-                    }
-                }
-
-                if (exists) {
-                    printf("bushell: error\n");
-                } else {
-                    // grow the children list if it is full
-                    if (cwd->child_count == cwd->child_capacity) {
-                        if (cwd->child_capacity == 0) {
-                            cwd->child_capacity = 2;
-                        } else {
-                            cwd->child_capacity = cwd->child_capacity * 2;
-                        }
-                        cwd->children = realloc(cwd->children, cwd->child_capacity * sizeof(struct Node *));
-                        if (cwd->children == NULL) {
-                            return 1;
-                        }
-                    }
-
-                    // create the new directory and add it to the list
-                    struct Node *n = malloc(sizeof(struct Node));
-                    if (n == NULL) {
-                        return 1;
-                    }
-                    strcpy(n->name, words[1]);
-                    n->is_dir = 1;
-                    n->parent = cwd;
-                    n->children = NULL;
-                    n->child_count = 0;
-                    n->child_capacity = 0;
-                    cwd->children[cwd->child_count] = n;
-                    cwd->child_count++;
-                }
-            }
-	 } else if (strcmp(words[0], "cd") == 0) {
+    		char parent_path[1100];
+    		char new_name[1100];
+    		if (count != 2 || !split_path(words[1], parent_path, new_name)) {
+        		printf("bushell:error\n");
+    		} else {
+        		struct Node *dir = resolve_path(cwd, root, parent_path);
+        		if (dir == NULL || !dir->is_dir || find_child(dir, new_name) != NULL) {
+            			printf("bushell:error\n");
+        		} else if (add_child(dir, new_name, 1) == NULL) {
+            			printf("bushell:error\n");
+        		}
+    		}
+	} else if (strcmp(words[0], "cd") == 0) {
    		 if (count != 2) {
         		printf("bushell:error\n");
     		} else {
@@ -190,7 +223,19 @@ int main(void) {
             			cwd = target;
         		}
     		}
-
+	} else if (strcmp(words[0], "touch") == 0) {
+    		char parent_path[1100];
+    		char new_name[1100];
+    		if (count != 2 || !split_path(words[1], parent_path, new_name)) {
+        		printf("bushell:error\n");
+    		} else {
+        		struct Node *dir = resolve_path(cwd, root, parent_path);
+        		if (dir == NULL || !dir->is_dir || find_child(dir, new_name) != NULL) {
+            			printf("bushell:error\n");
+        	} else if (add_child(dir, new_name, 0) == NULL) {
+            		printf("bushell:error\n");
+        	}
+    	}
         } else if (strcmp(words[0], "ls") == 0) {
             for (int i = 0; i < cwd->child_count; i++) {
                 printf("%s", cwd->children[i]->name);
