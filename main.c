@@ -2,14 +2,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-// entry of the file system
-
 struct Inode {
     char *content;
     size_t size;
     size_t ref_count;
 };
 
+// entry of the file system
 struct Node {
     char *name;
     int is_dir;
@@ -209,6 +208,46 @@ void pwd_to_buf(struct Node *node, struct Buf *b) {
     }
 }
 
+int write_file(struct Node *cwd, struct Node *root, const char *path,
+               const char *text, size_t len, int append) {
+    char parent_path[1100];
+    char name[1100];
+    if (!split_path(path, parent_path, name)) {
+        return 0;
+    }
+    struct Node *dir = resolve_path(cwd, root, parent_path);
+    if (dir == NULL || !dir->is_dir) {
+        return 0;
+    }
+    struct Node *node = find_child(dir, name);
+    if (node == NULL) {
+        node = add_child(dir, name, 0);
+        if (node == NULL) {
+            return 0;
+        }
+    } else if (node->is_dir) {
+        return 0;
+    }
+
+    struct Inode *in = node->inode;
+    if (!append) {
+        free(in->content);
+        in->content = NULL;
+        in->size = 0;
+    }
+    if (len > 0) {
+        char *bigger = realloc(in->content, in->size + len + 1);
+        if (bigger == NULL) {
+            return 0;
+        }
+        memcpy(bigger + in->size, text, len);
+        in->size += len;
+        bigger[in->size] = '\0';
+        in->content = bigger;
+    }
+    return 1;
+}
+
 int main(void) {
     char line[1100];
 
@@ -263,8 +302,29 @@ int main(void) {
 	
 	int err = 0;
 	struct Buf out = {NULL, 0, 0};
+	
+	int redir = 0;
+	char *redir_target = NULL;
+	for (int i = 0; i < count; i++) {
+   		if (strcmp(words[i], ">") == 0 || strcmp(words[i], ">>") == 0) {
+        		if (strcmp(words[i], ">") == 0) {
+            			redir = 1;
+        		} else {
+            			redir = 2;
+        		}
+        		if (i == 0 || i + 2 != count) {
+            			err = 1;
+        		} else {
+            			redir_target = words[i + 1];
+            			count = i;
+        		}
+        		break;
+    		}
+	}
+	
+	if(err){}
 
-        if (strcmp(words[0], "pwd") == 0) {
+        else if (strcmp(words[0], "pwd") == 0) {
 		if ( count != 1) {
 			err = 1;	    
 		} else {
@@ -357,15 +417,51 @@ int main(void) {
         		}
         		buf_add(&out, "\n");
     		}
+		
+	} else if (strcmp(words[0], "cat") == 0) {
+    		if (count != 2) {
+        		err = 1;
+    		} else {
+        		struct Node *f = resolve_path(cwd, root, words[1]);
+        		if (f == NULL || f->is_dir) {
+            			err = 1;
+        		} else if (f->inode->size > 0) {
+            			buf_add(&out, f->inode->content);
+        		}
+    		}
+	} else if (strcmp(words[0], "du") == 0) {
+    		if (count != 2) {
+        		err = 1;
+    		} else {
+        		struct Node *f = resolve_path(cwd, root, words[1]);
+        		if (f == NULL || f->is_dir) {
+            			err = 1;
+        		} else {
+            			char num[32];
+            			snprintf(num, sizeof(num), "%zu", f->inode->size);
+            			buf_add(&out, num);
+            			buf_add(&out, "\t");
+            			buf_add(&out, words[1]);
+            			buf_add(&out, "\n");
+        		}
+    		}	
 	} else {
             err = 1;
         } 
 	if (err) {
-            printf("bushell: error\n");
-        } else if (out.len > 0) {
-            fwrite(out.data, 1, out.len, stdout);
-        }
-        free(out.data);
+    		printf("bushell: error\n");
+	} else if (redir != 0) {
+    		const char *text = "";
+    		if (out.len > 0) {
+        		text = out.data;
+    		}
+    		if (!write_file(cwd, root, redir_target, text, out.len, redir == 2)) {
+        		printf("bushell: error\n");
+    		}
+	} else if (out.len > 0) {
+    		fwrite(out.data, 1, out.len, stdout);
+	}
+	free(out.data);
     }
 
     free_tree(root);
