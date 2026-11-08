@@ -19,21 +19,28 @@ struct Node {
     int child_capacity;
 };
 
-// frees a node and everything below it
+void release_inode(struct Inode *in) {
+    in->ref_count--;
+    if (in->ref_count == 0) {
+        free(in->content);
+        free(in);
+    }
+}
+
+void free_node(struct Node *node) {
+    free(node->children);
+    if (node->inode != NULL) {
+        release_inode(node->inode);
+    }
+    free(node->name);
+    free(node);
+}
+
 void free_tree(struct Node *node) {
     for (int i = 0; i < node->child_count; i++) {
         free_tree(node->children[i]);
     }
-    free(node->children);
-    if (node->inode != NULL) {
-        node->inode->ref_count--;
-        if (node->inode->ref_count == 0) {
-            free(node->inode->content);
-            free(node->inode);
-        }
-    }
-    free(node->name);
-    free(node);
+    free_node(node);
 }
 
 struct Node *find_child(struct Node *dir, const char *name) {
@@ -79,7 +86,7 @@ struct Node *resolve_path(struct Node *cwd, struct Node *root, const char *path)
     return cur;
 }
 
-struct Node *add_child(struct Node *dir, const char *name, int is_dir) {
+int attach_child(struct Node *dir, struct Node *node) {
     if (dir->child_count == dir->child_capacity) {
         int newcap;
         if (dir->child_capacity == 0) {
@@ -89,19 +96,39 @@ struct Node *add_child(struct Node *dir, const char *name, int is_dir) {
         }
         struct Node **bigger = realloc(dir->children, newcap * sizeof(struct Node *));
         if (bigger == NULL) {
-            return NULL;
+            return 0;
         }
         dir->children = bigger;
         dir->child_capacity = newcap;
     }
+    dir->children[dir->child_count] = node;
+    dir->child_count++;
+    node->parent = dir;
+    return 1;
+}
+
+int remove_child(struct Node *dir, struct Node *node) {
+    for (int i = 0; i < dir->child_count; i++) {
+        if (dir->children[i] == node) {
+            for (int j = i; j < dir->child_count - 1; j++) {
+                dir->children[j] = dir->children[j + 1];
+            }
+            dir->child_count--;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+struct Node *add_child(struct Node *dir, const char *name, int is_dir) {
     struct Node *n = malloc(sizeof(struct Node));
     if (n == NULL) {
         return NULL;
     }
     n->name = malloc(strlen(name) + 1);
     if (n->name == NULL) {
-       free(n);
-       return NULL;
+        free(n);
+        return NULL;
     }
     strcpy(n->name, name);
     n->is_dir = is_dir;
@@ -109,22 +136,22 @@ struct Node *add_child(struct Node *dir, const char *name, int is_dir) {
     n->children = NULL;
     n->child_count = 0;
     n->child_capacity = 0;
-    
-    if (is_dir) {
-	n->inode = NULL;
-    } else {
-	n->inode = malloc(sizeof(struct Inode));
-	if (n->inode == NULL) {
-		free(n->name);
-		free(n);
-		return NULL;
-	}
-	n->inode->content = NULL;
-	n->inode->size = 0;
-	n->inode->ref_count = 1;
+    n->inode = NULL;
+    if (!is_dir) {
+        n->inode = malloc(sizeof(struct Inode));
+        if (n->inode == NULL) {
+            free(n->name);
+            free(n);
+            return NULL;
+        }
+        n->inode->content = NULL;
+        n->inode->size = 0;
+        n->inode->ref_count = 1;
     }
-    dir->children[dir->child_count] = n;
-    dir->child_count++;
+    if (!attach_child(dir, n)) {
+        free_node(n);
+        return NULL;
+    }
     return n;
 }
 
@@ -499,6 +526,38 @@ int main(void) {
             			buf_add(&out, "\n");
         		}
     		}	
+	} else if (strcmp(words[0], "rm") == 0) {
+    		if (count != 2) {
+        		err = 1;
+    		} else {
+        		struct Node *node = resolve_path(cwd, root, words[1]);
+        		if (node == NULL || node == root || node == cwd || node->child_count > 0) {
+            			err = 1;
+        		} else {
+            			remove_child(node->parent, node);
+            			free_node(node);
+        		}
+    		}
+	} else if (strcmp(words[0], "cp") == 0) {
+    		if (count != 3) {
+        		err = 1;
+    		} else {
+        		struct Node *src = resolve_path(cwd, root, words[1]);
+        		struct Node *dest = resolve_path(cwd, root, words[2]);
+        		if (src == NULL || src->is_dir) {
+            			err = 1;
+        		} else if (dest != NULL && dest->inode == src->inode) {
+            			err = 1;
+        		} else {
+            			const char *text = "";
+            			if (src->inode->size > 0) {
+                			text = src->inode->content;
+            			}
+            			if (!write_file(cwd, root, words[2], text, src->inode->size, 0)) {
+                			err = 1;
+            			}
+        		}
+    		}
 	} else {
             err = 1;
         } 
