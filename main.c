@@ -109,6 +109,7 @@ struct Node *add_child(struct Node *dir, const char *name, int is_dir) {
     n->children = NULL;
     n->child_count = 0;
     n->child_capacity = 0;
+    
     if (is_dir) {
 	n->inode = NULL;
     } else {
@@ -248,6 +249,58 @@ int write_file(struct Node *cwd, struct Node *root, const char *path,
     return 1;
 }
 
+int tokenize(char *line, char *words[], int quoted[], int max) {
+    char *r = line;
+    char *w = line;
+    int count = 0;
+
+    while (*r != '\0') {
+        while (*r == ' ' || *r == '\t') {
+            r++;
+        }
+        if (*r == '\0') {
+            break;
+        }
+        if (count >= max) {
+            return -1;
+        }
+        words[count] = w;
+        quoted[count] = 0;
+        int in_quotes = 0;
+
+        while (*r != '\0' && (in_quotes || (*r != ' ' && *r != '\t'))) {
+            if (*r == '\\') {
+                quoted[count] = 1;
+                r++;
+                if (*r == '\0') {
+                    return -1;
+                }
+                *w = *r;
+                w++;
+                r++;
+            } else if (*r == '"') {
+                quoted[count] = 1;
+                in_quotes = !in_quotes;
+                r++;
+            } else {
+                *w = *r;
+                w++;
+                r++;
+            }
+        }
+        if (in_quotes) {
+            return -1;
+        }
+        if (*r != '\0') {
+            r++;
+        }
+        *w = '\0';
+        w++;
+        count++;
+    }
+    return count;
+}
+
 int main(void) {
     char line[1100];
 
@@ -284,14 +337,15 @@ int main(void) {
 
         // Split the line into words
         char *words[600];
-        int count = 0;
-
-        char *word = strtok(line, " ");
-        while (word != NULL) {
-            words[count] = word;
-            count++;
-            word = strtok(NULL, " ");
-        }
+	int quoted[600];
+	int count = tokenize(line, words, quoted, 600);
+	if (count < 0) {
+    		printf("bushell:error\n");
+    		continue;
+	}
+	if (count == 0) {
+    		continue;
+	}
 
         if (count == 0) {
             continue;
@@ -306,7 +360,7 @@ int main(void) {
 	int redir = 0;
 	char *redir_target = NULL;
 	for (int i = 0; i < count; i++) {
-   		if (strcmp(words[i], ">") == 0 || strcmp(words[i], ">>") == 0) {
+   		if (!quoted[i] && (strcmp(words[i], ">") == 0 || strcmp(words[i], ">>") == 0)) {
         		if (strcmp(words[i], ">") == 0) {
             			redir = 1;
         		} else {
