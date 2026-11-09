@@ -19,6 +19,34 @@ struct Node {
     int child_capacity;
 };
 
+struct Buf {
+    char *data;
+    size_t len;
+    size_t cap;
+};
+
+int buf_add(struct Buf *b, const char *s) {
+    size_t n = strlen(s);
+    if (b->len + n + 1 > b->cap) {
+        size_t newcap = b->cap;
+        if (newcap == 0) {
+            newcap = 64;
+        }
+        while (b->len + n + 1 > newcap) {
+            newcap = newcap * 2;
+        }
+        char *bigger = realloc(b->data, newcap);
+        if (bigger == NULL) {
+            return 0;
+        }
+        b->data = bigger;
+        b->cap = newcap;
+    }
+    memcpy(b->data + b->len, s, n + 1);
+    b->len += n;
+    return 1;
+}
+
 void release_inode(struct Inode *in) {
     in->ref_count--;
     if (in->ref_count == 0) {
@@ -191,33 +219,31 @@ int compare_nodes(const void *a, const void *b) {
     return strcmp(x->name, y->name);
 }
 
-struct Buf {
-    char *data;
-    size_t len;
-    size_t cap;
-};
 
-int buf_add(struct Buf *b, const char *s) {
-    size_t n = strlen(s);
-    if (b->len + n + 1 > b->cap) {
-        size_t newcap = b->cap;
-        if (newcap == 0) {
-            newcap = 64;
-        }
-        while (b->len + n + 1 > newcap) {
-            newcap = newcap * 2;
-        }
-        char *bigger = realloc(b->data, newcap);
-        if (bigger == NULL) {
-            return 0;
-        }
-        b->data = bigger;
-        b->cap = newcap;
+
+void tree_children(struct Node *dir, int depth, struct Buf *b) {
+    if (dir->child_count > 1) {
+        qsort(dir->children, dir->child_count, sizeof(struct Node *), compare_nodes);
     }
-    memcpy(b->data + b->len, s, n + 1);
-    b->len += n;
-    return 1;
+    for (int i = 0; i < dir->child_count; i++) {
+        struct Node *c = dir->children[i];
+        for (int d = 0; d < depth; d++) {
+            buf_add(b, "  ");
+        }
+        buf_add(b, c->name);
+        if (c->is_dir) {
+            buf_add(b, "/");
+        }
+        buf_add(b, "\n");
+        if (c->is_dir) {
+            tree_children(c, depth + 1, b);
+        }
+    }
 }
+
+
+
+
 
 void path_to_buf(struct Node *node, struct Buf *b) {
     if (node->parent == NULL) {
@@ -326,6 +352,16 @@ int tokenize(char *line, char *words[], int quoted[], int max) {
         count++;
     }
     return count;
+}
+
+int is_inside(struct Node *node, struct Node *ancestor) {
+    while (node != NULL) {
+        if (node == ancestor) {
+            return 1;
+        }
+        node = node->parent;
+    }
+    return 0;
 }
 
 int main(void) {
@@ -555,6 +591,63 @@ int main(void) {
             			}
             			if (!write_file(cwd, root, words[2], text, src->inode->size, 0)) {
                 			err = 1;
+            			}
+        		}
+    		}
+	} else if (strcmp(words[0], "tree") == 0) {
+    		if (count != 1) {
+        		err = 1;
+    		} else {
+        		pwd_to_buf(cwd, &out);
+        		buf_add(&out, "\n");
+       			tree_children(cwd, 1, &out);
+    		}
+	} else if (strcmp(words[0], "mv") == 0) {
+    		if (count != 3) {
+        		err = 1;
+    		} else {
+        		struct Node *src = resolve_path(cwd, root, words[1]);
+        		struct Node *dest = resolve_path(cwd, root, words[2]);
+        		struct Node *newdir = NULL;
+        		char *newname = NULL;
+        		char parent_path[1100];
+        		char new_name[1100];
+
+        		if (src == NULL || src == root) {
+            			err = 1;
+        		} else if (dest != NULL) {
+            			if (!dest->is_dir || find_child(dest, src->name) != NULL || is_inside(dest, src)) {
+                			err = 1;
+            			} else {
+                			newdir = dest;
+            			}
+        		} else if (!split_path(words[2], parent_path, new_name)) {
+            			err = 1;
+        		} else {
+            			newdir = resolve_path(cwd, root, parent_path);
+            			if (newdir == NULL || !newdir->is_dir || is_inside(newdir, src)) {
+                			err = 1;
+            			} else {
+                			newname = malloc(strlen(new_name) + 1);
+                			if (newname == NULL) {
+                    				err = 1;
+                			} else {
+                    				strcpy(newname, new_name);
+                			}
+            			}
+        		}
+
+        		if (!err) {
+            			struct Node *old_parent = src->parent;
+            			if (!attach_child(newdir, src)) {
+                			err = 1;
+                			free(newname);
+            			} else {
+                			remove_child(old_parent, src);
+                			if (newname != NULL) {
+                    				free(src->name);
+                    				src->name = newname;
+                			}
             			}
         		}
     		}
