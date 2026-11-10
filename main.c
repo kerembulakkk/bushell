@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+enum NodeType { NODE_FILE, NODE_DIR, NODE_SYMLINK };
+
 struct Inode {
     char *content;
     size_t size;
@@ -11,7 +13,8 @@ struct Inode {
 // entry of the file system
 struct Node {
     char *name;
-    int is_dir;
+    enum NodeType type;
+    char *target;
     struct Node *parent;
     struct Node **children;
     struct Inode *inode;
@@ -100,7 +103,7 @@ struct Node *resolve_path(struct Node *cwd, struct Node *root, const char *path)
                 cur = cur->parent;
             }
         } else {
-            if (!cur->is_dir) {
+            if (cur->type != NODE_DIR) {
                 return NULL;
             }
             struct Node *next = find_child(cur, part);
@@ -135,20 +138,7 @@ int attach_child(struct Node *dir, struct Node *node) {
     return 1;
 }
 
-int remove_child(struct Node *dir, struct Node *node) {
-    for (int i = 0; i < dir->child_count; i++) {
-        if (dir->children[i] == node) {
-            for (int j = i; j < dir->child_count - 1; j++) {
-                dir->children[j] = dir->children[j + 1];
-            }
-            dir->child_count--;
-            return 1;
-        }
-    }
-    return 0;
-}
-
-struct Node *add_child(struct Node *dir, const char *name, int is_dir) {
+struct Node *new_node(const char *name, enum NodeType type) {
     struct Node *n = malloc(sizeof(struct Node));
     if (n == NULL) {
         return NULL;
@@ -159,17 +149,25 @@ struct Node *add_child(struct Node *dir, const char *name, int is_dir) {
         return NULL;
     }
     strcpy(n->name, name);
-    n->is_dir = is_dir;
-    n->parent = dir;
+    n->type = type;
+    n->parent = NULL;
     n->children = NULL;
     n->child_count = 0;
     n->child_capacity = 0;
     n->inode = NULL;
-    if (!is_dir) {
+    n->target = NULL;
+    return n;
+}
+
+struct Node *add_child(struct Node *dir, const char *name, enum NodeType type) {
+    struct Node *n = new_node(name, type);
+    if (n == NULL) {
+        return NULL;
+    }
+    if (type == NODE_FILE) {
         n->inode = malloc(sizeof(struct Inode));
         if (n->inode == NULL) {
-            free(n->name);
-            free(n);
+            free_node(n);
             return NULL;
         }
         n->inode->content = NULL;
@@ -181,6 +179,33 @@ struct Node *add_child(struct Node *dir, const char *name, int is_dir) {
         return NULL;
     }
     return n;
+}
+
+struct Node *add_hardlink(struct Node *dir, const char *name, struct Node *src) {
+    struct Node *n = new_node(name, NODE_FILE);
+    if (n == NULL) {
+        return NULL;
+    }
+    n->inode = src->inode;
+    n->inode->ref_count++;
+    if (!attach_child(dir, n)) {
+        free_node(n);
+        return NULL;
+    }
+    return n;
+}
+
+int remove_child(struct Node *dir, struct Node *node) {
+    for (int i = 0; i < dir->child_count; i++) {
+        if (dir->children[i] == node) {
+            for (int j = i; j < dir->child_count - 1; j++) {
+                dir->children[j] = dir->children[j + 1];
+            }
+            dir->child_count--;
+            return 1;
+        }
+    }
+    return 0;
 }
 
 int split_path(const char *path, char *parent, char *name) {
@@ -231,11 +256,11 @@ void tree_children(struct Node *dir, int depth, struct Buf *b) {
             buf_add(b, "  ");
         }
         buf_add(b, c->name);
-        if (c->is_dir) {
+        if (c->type == NODE_DIR) {
             buf_add(b, "/");
         }
         buf_add(b, "\n");
-        if (c->is_dir) {
+        if (c->type == NODE_DIR) {
             tree_children(c, depth + 1, b);
         }
     }
@@ -270,16 +295,16 @@ int write_file(struct Node *cwd, struct Node *root, const char *path,
         return 0;
     }
     struct Node *dir = resolve_path(cwd, root, parent_path);
-    if (dir == NULL || !dir->is_dir) {
+    if (dir == NULL || dir->type != NODE_DIR) {
         return 0;
     }
     struct Node *node = find_child(dir, name);
     if (node == NULL) {
-        node = add_child(dir, name, 0);
+        node = add_child(dir, name, NODE_FILE);
         if (node == NULL) {
             return 0;
         }
-    } else if (node->is_dir) {
+    } else if (node->type != NODE_FILE) {
         return 0;
     }
 
@@ -378,7 +403,8 @@ int main(void) {
        return 1;
     }
     strcpy(root->name, "/");
-    root->is_dir = 1;
+    root->type = NODE_DIR;
+    root->target = NULL;
     root->parent = NULL;
     root->children = NULL;
     root->child_count = 0;
@@ -463,9 +489,9 @@ int main(void) {
         		err = 1;
     		} else {
         		struct Node *dir = resolve_path(cwd, root, parent_path);
-        		if (dir == NULL || !dir->is_dir || find_child(dir, new_name) != NULL) {
+        		if (dir == NULL || dir->type != NODE_DIR || find_child(dir, new_name) != NULL) {
             			err = 1;
-        		} else if (add_child(dir, new_name, 1) == NULL) {
+        		} else if (add_child(dir, new_name, NODE_DIR) == NULL) {
             			err = 1;
         		}
     		}
@@ -474,7 +500,7 @@ int main(void) {
         		err = 1;
     		} else {
         		struct Node *target = resolve_path(cwd, root, words[1]);
-        		if (target == NULL || !target->is_dir) {
+        		if (target == NULL || target->type != NODE_DIR) {
             			err = 1;
         		} else {
             			cwd = target;
@@ -487,10 +513,10 @@ int main(void) {
         		err = 1;
     		} else {
         		struct Node *dir = resolve_path(cwd, root, parent_path);
-        		if (dir == NULL || !dir->is_dir) {
+        		if (dir == NULL || dir->type != NODE_DIR) {
             			err = 1;
         		} else if (find_child(dir, new_name) == NULL) {
-            			if (add_child(dir, new_name, 0) == NULL) {
+            			if (add_child(dir, new_name, NODE_FILE) == NULL) {
                				 err = 1;
             			}
         		}
@@ -528,7 +554,7 @@ int main(void) {
             			}
             			first = 0;
             			buf_add(&out, cwd->children[i]->name);
-            			if (cwd->children[i]->is_dir) {
+            			if (cwd->children[i]->type == NODE_DIR) {
                 			buf_add(&out, "/");
             			}
         		}
@@ -540,7 +566,7 @@ int main(void) {
         		err = 1;
     		} else {
         		struct Node *f = resolve_path(cwd, root, words[1]);
-        		if (f == NULL || f->is_dir) {
+        		if (f == NULL || f->type != NODE_FILE) {
             			err = 1;
         		} else if (f->inode->size > 0) {
             			buf_add(&out, f->inode->content);
@@ -551,7 +577,7 @@ int main(void) {
         		err = 1;
     		} else {
         		struct Node *f = resolve_path(cwd, root, words[1]);
-        		if (f == NULL || f->is_dir) {
+        		if (f == NULL || f->type != NODE_FILE) {
             			err = 1;
         		} else {
             			char num[32];
@@ -580,7 +606,7 @@ int main(void) {
     		} else {
         		struct Node *src = resolve_path(cwd, root, words[1]);
         		struct Node *dest = resolve_path(cwd, root, words[2]);
-        		if (src == NULL || src->is_dir) {
+        		if (src == NULL || src->type != NODE_FILE) {
             			err = 1;
         		} else if (dest != NULL && dest->inode == src->inode) {
             			err = 1;
@@ -616,7 +642,7 @@ int main(void) {
         		if (src == NULL || src == root) {
             			err = 1;
         		} else if (dest != NULL) {
-            			if (!dest->is_dir || find_child(dest, src->name) != NULL || is_inside(dest, src)) {
+            			if (dest->type != NODE_DIR || find_child(dest, src->name) != NULL || is_inside(dest, src)) {
                 			err = 1;
             			} else {
                 			newdir = dest;
@@ -625,7 +651,7 @@ int main(void) {
             			err = 1;
         		} else {
             			newdir = resolve_path(cwd, root, parent_path);
-            			if (newdir == NULL || !newdir->is_dir || is_inside(newdir, src)) {
+            			if (newdir == NULL || newdir->type != NODE_DIR || is_inside(newdir, src)) {
                 			err = 1;
             			} else {
                 			newname = malloc(strlen(new_name) + 1);
@@ -648,6 +674,24 @@ int main(void) {
                     				free(src->name);
                     				src->name = newname;
                 			}
+            			}
+        		}
+    		}
+	} else if (strcmp(words[0], "ln") == 0) {
+    		char parent_path[1100];
+    		char new_name[1100];
+    		if (count != 3) {
+        		err = 1;
+    		} else {
+        		struct Node *src = resolve_path(cwd, root, words[1]);
+        		if (src == NULL || src->type != NODE_FILE || !split_path(words[2], parent_path, new_name)) {
+            			err = 1;
+        		} else {
+            			struct Node *dir = resolve_path(cwd, root, parent_path);
+            			if (dir == NULL || dir->type != NODE_DIR || find_child(dir, new_name) != NULL) {
+                			err = 1;
+            			} else if (add_hardlink(dir, new_name, src) == NULL) {
+                			err = 1;
             			}
         		}
     		}
